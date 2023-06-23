@@ -16,9 +16,9 @@ from typing import Optional
 import zipfile
 import re
 
-import pylegu
 from legu_hashmap import LeguHashmap
 from legu_packed_file import LeguPackedFile
+from pyucl import ucl
 
 
 _LIBSHELL_RE = re.compile(r"libshell\w-([\d\.]+).so")
@@ -40,12 +40,40 @@ def decrypt(buff: bytes, password: bytes) -> bytes:
     Decrypt the buffer with XTEA
     """
     limit = len(buff) & 0xFFFFFFF8
-    aligned_buff = buff[:limit]
+    aligned_buff = list(int.from_bytes(buff[i:i+4], byteorder='little') for i in range(0, limit, 4))
     ekey = key_derivation(password)
+    ekey_as_u32 = [int.from_bytes(ekey[i:i+4], byteorder='little') for i in range(0, len(ekey), 4)]
     nb_round = 3
-    uncrypted = pylegu.decrypt(list(ekey), list(aligned_buff), nb_round)
-    uncrypted += buff[limit:]
-    return bytes(uncrypted)
+    xtea_decrypt(ekey_as_u32, aligned_buff, len(aligned_buff)*4, nb_round)
+    uncrypted = [val.to_bytes(4, byteorder='little') for val in aligned_buff] + [val.to_bytes(1, byteorder='little') for val in buff[limit:]]
+    return b''.join(uncrypted)
+
+
+def xtea_decrypt(key, buf, ilen, nb_round):
+    count = ilen // 8
+    key_off = (ilen & 8) // 4
+    DELTA = 0x9e3779b9
+    UINT32_MASK = 0xFFFFFFFF
+
+    key_0 = key[key_off] & UINT32_MASK
+    key_1 = key[key_off + 1] & UINT32_MASK
+
+    for i in range(0, count * 2, 2):
+        buf[i] ^= key_0
+        buf[i + 1] ^= key_1
+
+        sum = DELTA * nb_round
+        temp0 = buf[i] & UINT32_MASK
+        temp1 = buf[i + 1] & UINT32_MASK
+
+        for _ in range(nb_round):
+            temp1 = (temp1 - ((key[2] + ((temp0 << 4) & UINT32_MASK)) ^ (key[3] + ((temp0 >> 5) & UINT32_MASK)) ^ (temp0 + sum))) & UINT32_MASK
+            temp0 = (temp0 - ((key[0] + ((temp1 << 4) & UINT32_MASK)) ^ (key[1] + ((temp1 >> 5) & UINT32_MASK)) ^ (temp1 + sum))) & UINT32_MASK
+            sum -= DELTA
+
+        buf[i] = temp0
+        buf[i + 1] = temp1
+    return 0
 
 
 def dvmComputeUtf8Hash(clazz: str) -> int:
@@ -121,7 +149,7 @@ def legu_unpack(apk_path: str):
     for idx, packed_dex in enumerate(legu_main_data.packed_dex):
         print(f"[+] dex {idx:d} compressed size:   0x{packed_dex.compressed_size:x}")
         print(f"[+] dex {idx:d} uncompressed size: 0x{packed_dex.uncompressed_size:x}")
-        uncompressed = pylegu.nrv_decompress(list(packed_dex.data), packed_dex.uncompressed_size + 0x400)
+        uncompressed = list(ucl.nrv2d_decompress(bytes(packed_dex.data), packed_dex.uncompressed_size + 0x400))
         uncompressed_dex_files.append(io.BytesIO(bytes(uncompressed)[0x10:]))
 
     print(f"\n[+] Unpacking #{legu_main_data.nb_dex_files:d} hashmap ...")
@@ -129,7 +157,7 @@ def legu_unpack(apk_path: str):
         print(f"[+] hashmap {idx:d} compressed size:   0x{hashmap.compressed_size:x}")
         print(f"[+] hashmap {idx:d} uncompressed size: 0x{hashmap.uncompressed_size:x}")
         uncrypted = decrypt(hashmap.data, password)
-        uncompressed = pylegu.nrv_decompress(list(uncrypted), hashmap.uncompressed_size + 0x400)
+        uncompressed = ucl.nrv2d_decompress(bytes(uncrypted), hashmap.uncompressed_size + 0x400)
         hasmaps.append(io.BytesIO(bytes(uncompressed)))
 
     print(f"\n[+] Unpacking #{legu_main_data.nb_dex_files:d} packed methods ...")
@@ -137,7 +165,7 @@ def legu_unpack(apk_path: str):
         print(f"[+] packed methods {idx:d} compressed_size:   0x{packedmethods.compressed_size:x}")
         print(f"[+] packed methods {idx:d} uncompressed_size: 0x{packedmethods.uncompressed_size:x}")
         uncrypted = decrypt(packedmethods.data, password)
-        uncompressed = pylegu.nrv_decompress(list(uncrypted), packedmethods.uncompressed_size + 0x400)
+        uncompressed = ucl.nrv2d_decompress(bytes(uncrypted), packedmethods.uncompressed_size + 0x400)
         packed_methods_files.append(io.BytesIO(bytes(uncompressed)))
 
     print("\n[+] Stage 2: Patching DEX files")

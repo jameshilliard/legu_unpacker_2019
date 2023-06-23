@@ -21,19 +21,6 @@ The *hashmap* embedded in the second part is described in the [legu_hashmap.ks](
 <img src="imgs/hashmap.png"/><br />
 </p>
 
-## pylegu
-
-[pylegu](./pylegu) contains the Python bindings to decrypt and uncompress the data embedded in ``assets/0OO00l111l1l``.
-
-To compile and install ``pylegu``:
-
-```bash
-$ cd pylegu
-$ python3.7 ./setup.py build -j4 install --user
-$ python -c "import pylegu"
-```
-
-One could also use [jap/pyucl](https://github.com/jap/pyucl) to decompress the data and [aguinet/dragonffi](https://github.com/aguinet/dragonffi) to bind the custom implementation of XTEA.
 
 ## Get Started
 
@@ -69,6 +56,5 @@ The unpacked DEX files are located in the ``unpacked.apk`` file.
 - Python >= 3.7
 - Kaitai Struct
 - LIEF
-- pylegu
-
+- [pyucl](https://github.com/jap/pyucl)
 
